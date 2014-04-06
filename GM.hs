@@ -52,7 +52,9 @@ data Instruction = Unwind
                  | Pushint Int
                  | Push Int
                  | Mkap
-                 | Slide Int
+--                 | Slide Int
+                 | Update Int
+                 | Pop Int
                  deriving(Show, Eq)
 
 type GmStack = [Addr]
@@ -70,6 +72,7 @@ putHeap heap' (i, stack, heap, globals, stats) = (i, stack, heap', globals, stat
 data Node = NNum Int
           | NAp Addr Addr
           | NGlobal Int GmCode
+          | NInd Addr
             deriving(Show, Eq)
 
 type GmGlobals = ASSOC Name Addr
@@ -115,7 +118,9 @@ dispatch (Pushglobal f) = pushglobal f
 dispatch (Pushint n) = pushint n
 dispatch Mkap = mkap
 dispatch (Push n) = push n
-dispatch (Slide n) = slide n
+--dispatch (Slide n) = slide n
+dispatch (Pop n) = pop n
+dispatch (Update n) = update n
 dispatch Unwind = unwind
 pushglobal f state = putStack(a:getStack state) state
   where
@@ -132,18 +137,38 @@ mkap state = putHeap heap' (putStack (a:as') state)
     (heap', a) = hAlloc (getHeap state) (NAp a1 a2)
     (a1:a2:as') = getStack state
 
+
 push :: Int -> GmState -> GmState
+{- 
 push n state = putStack (a:as) state
   where
     as = getStack state
     a = getArg (hLookup (getHeap state) (as !! (n+1)))
+-}
+push n state = putStack (an:stack) state
+  where
+    stack = getStack state
+    an = stack !! n
+
 
 getArg :: Node -> Addr
 getArg (NAp a1 a2) = a2
 
-slide :: Int -> GmState -> GmState
-slide n state = putStack (a:drop n as) state
-  where (a:as) = getStack state
+--slide :: Int -> GmState -> GmState
+--slide n state = putStack (a:drop n as) state
+--  where (a:as) = getStack state
+
+pop :: Int -> GmState -> GmState
+pop n state = putStack stack' state
+  where
+    stack' = drop n (getStack state)
+update :: Int -> GmState -> GmState
+update n state = putHeap heap' (putStack stack' state)
+  where
+    (a:stack') = getStack state
+    an = stack' !! n
+    heap' = hUpdate (getHeap state) an (NInd a)
+
 
 unwind::GmState -> GmState
 unwind state = newState (hLookup heap a)
@@ -154,7 +179,9 @@ unwind state = newState (hLookup heap a)
     newState (NAp a1 a2) = putCode [Unwind] (putStack (a1:a:as) state)
     newState (NGlobal n c)
       | length as < n = error "Unwinding with too few arguments"
-      | otherwise = putCode c state
+--      | otherwise = putCode c state --
+      | otherwise = putStack (rearrange n heap (a:as)) state
+    newState (NInd a') = putStack (a':as) state
 
 
 compile :: CoreProgram -> GmState
@@ -179,7 +206,10 @@ initialCode = [Pushglobal "main", Unwind]
 
 compileSc :: (Name, [Name], CoreExpr) -> GmCompiledSC
 compileSc (name, env, body) = (name, length env, compileR body (zip2 env [0..]))
-compileR e env = compileC e env ++ [Slide (length env + 1), Unwind]
+--compileR e env = compileC e env ++ [Slide (length env + 1), Unwind]
+compileR e env = compileC e env ++ [Update d, Pop d, Unwind]
+  where
+    d = length env
 
 type GmCompiler = CoreExpr -> GmEnvironment -> GmCode
 type GmEnvironment = ASSOC Name Int
@@ -230,7 +260,9 @@ showInstruction (Pushglobal f) = (iStr "Pushglobal ") `iAppend` (iStr f)
 showInstruction (Push n) = (iStr "Push ") `iAppend` (iNum n)
 showInstruction (Pushint n) = (iStr "Pushint ") `iAppend` (iNum n)
 showInstruction Mkap = iStr "Mkap"
-showInstruction (Slide n) = (iStr "Slide ") `iAppend` (iNum n)
+--showInstruction (Slide n) = (iStr "Slide ") `iAppend` (iNum n)
+showInstruction (Pop n) = iStr "Pop " `iAppend` (iNum n)
+showInstruction (Update n) = iStr "Update " `iAppend` (iNum n)
 
 showState::GmState -> Iseq
 showState s = iConcat [showStack s, iNewline,
@@ -253,8 +285,13 @@ showNode s a (NGlobal n g) = iConcat [iStr "Global ", iStr v]
     v = head [n|(n,b) <- getGlobals s, a == b]
 showNode s a (NAp a1 a2) = iConcat [iStr "Ap ", iStr (showaddr a1),
                                     iStr " ", iStr (showaddr a2)]
+showNode s a (NInd a') = iConcat [iStr "Ind ", iStr (showaddr a')]
 showStats :: GmState -> Iseq
 showStats s =
   iConcat [iStr "Steps taken = ", iNum (statGetSteps (getStats s)), iNewline]
 
 
+rearrange :: Int -> GmHeap -> GmStack -> GmStack
+rearrange n heap as = take n as' ++ drop n as
+  where
+    as' = map (getArg . hLookup heap) (tail as)
