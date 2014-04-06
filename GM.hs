@@ -7,6 +7,8 @@ import PrettyPrint
 
 import Data.List (mapAccumL)
 
+
+
 data AExpr = Num Int
            | Plus AExpr AExpr
            | Mult AExpr AExpr
@@ -190,6 +192,19 @@ unwind state = newState (hLookup heap a)
       | otherwise = putStack (rearrange n heap (a:as)) state
     newState (NInd a') = putStack (a':as) state
 
+rearrange :: Int -> GmHeap -> GmStack -> GmStack
+rearrange n heap as = take n as' ++ drop n as
+  where
+    as' = map (getArg . hLookup heap) (tl as)
+
+allocNodes :: Int -> GmHeap -> (GmHeap, [Addr])
+allocNodes 0 heap = (heap, [])
+allocNodes n heap = (heap2, a:as)
+  where
+    (heap1, as) = allocNodes (n -1) heap
+    (heap2, a) = hAlloc heap1 (NInd hNull)
+
+
 
 compile :: CoreProgram -> GmState
 compile program = (initialCode, [], heap, globals, statInitial)
@@ -239,6 +254,7 @@ compileLet comp defs expr env =
   compileLet' defs env ++ comp expr env' ++ [Slide (length defs)]
   where
     env' = compileArgs defs env
+
 compileLet' :: [(Name, CoreExpr)] -> GmEnvironment -> GmCode
 compileLet' [] env = []
 compileLet' ((name, expr):defs) env =
@@ -320,14 +336,3 @@ showStats s =
   iConcat [iStr "Steps taken = ", iNum (statGetSteps (getStats s)), iNewline]
 
 
-rearrange :: Int -> GmHeap -> GmStack -> GmStack
-rearrange n heap as = take n as' ++ drop n as
-  where
-    as' = map (getArg . hLookup heap) (tail as)
-
-allocNodes :: Int -> GmHeap -> (GmHeap, [Addr])
-allocNodes 0 heap = (heap, [])
-allocNodes n heap = (heap2, a:as)
-  where
-    (heap1, as) = allocNodes (n -1) heap
-    (heap2, a) = hAlloc heap1 (NInd hNull)
