@@ -52,9 +52,10 @@ data Instruction = Unwind
                  | Pushint Int
                  | Push Int
                  | Mkap
---                 | Slide Int
+                 | Slide Int
                  | Update Int
                  | Pop Int
+                 | Alloc Int
                  deriving(Show, Eq)
 
 type GmStack = [Addr]
@@ -118,9 +119,10 @@ dispatch (Pushglobal f) = pushglobal f
 dispatch (Pushint n) = pushint n
 dispatch Mkap = mkap
 dispatch (Push n) = push n
---dispatch (Slide n) = slide n
+dispatch (Slide n) = slide n
 dispatch (Pop n) = pop n
 dispatch (Update n) = update n
+dispatch (Alloc n) = alloc n
 dispatch Unwind = unwind
 pushglobal f state = putStack(a:getStack state) state
   where
@@ -150,13 +152,18 @@ push n state = putStack (an:stack) state
     stack = getStack state
     an = stack !! n
 
+alloc n state = putHeap heap' (putStack stack' state)
+  where
+    (heap', addrs') = allocNodes n (getHeap state)
+    stack' = addrs'++getStack state
+
 
 getArg :: Node -> Addr
 getArg (NAp a1 a2) = a2
 
---slide :: Int -> GmState -> GmState
---slide n state = putStack (a:drop n as) state
---  where (a:as) = getStack state
+slide :: Int -> GmState -> GmState
+slide n state = putStack (a:drop n as) state
+  where (a:as) = getStack state
 
 pop :: Int -> GmState -> GmState
 pop n state = putStack stack' state
@@ -223,6 +230,27 @@ compileC (EVar v) env
 compileC (ENum n) env = [Pushint n]
 compileC (EAp e1 e2) env = compileC e2 env ++
                            compileC e1 (argOffset 1 env) ++ [Mkap]
+compileC (ELet recursive defs e) args
+  | recursive = compileLetrec compileC defs e args
+  | otherwise = compileLet    compileC defs e args
+
+compileLet :: GmCompiler -> [(Name, CoreExpr)] -> GmCompiler
+compileLet comp defs expr env =
+  compileLet' defs env ++ comp expr env' ++ [Slide (length defs)]
+  where
+    env' = compileArgs defs env
+compileLet' :: [(Name, CoreExpr)] -> GmEnvironment -> GmCode
+compileLet' [] env = []
+compileLet' ((name, expr):defs) env =
+  compileC expr env ++ compileLet' defs (argOffset 1 env)
+
+compileLetrec = undefined
+compileArgs :: [(Name, CoreExpr)] -> GmEnvironment -> GmEnvironment
+compileArgs defs env =
+  zip (map first defs) [n-1, n-2 ..0] ++ argOffset n env
+  where
+    n = length defs
+
 argOffset :: Int -> GmEnvironment -> GmEnvironment
 argOffset n env = [(v, n+m)|(v,m) <- env]
 
@@ -260,9 +288,10 @@ showInstruction (Pushglobal f) = (iStr "Pushglobal ") `iAppend` (iStr f)
 showInstruction (Push n) = (iStr "Push ") `iAppend` (iNum n)
 showInstruction (Pushint n) = (iStr "Pushint ") `iAppend` (iNum n)
 showInstruction Mkap = iStr "Mkap"
---showInstruction (Slide n) = (iStr "Slide ") `iAppend` (iNum n)
+showInstruction (Slide n) = (iStr "Slide ") `iAppend` (iNum n)
 showInstruction (Pop n) = iStr "Pop " `iAppend` (iNum n)
 showInstruction (Update n) = iStr "Update " `iAppend` (iNum n)
+showInstruction (Alloc n) = iStr "Alloc " `iAppend` (iNum n)
 
 showState::GmState -> Iseq
 showState s = iConcat [showStack s, iNewline,
@@ -295,3 +324,10 @@ rearrange :: Int -> GmHeap -> GmStack -> GmStack
 rearrange n heap as = take n as' ++ drop n as
   where
     as' = map (getArg . hLookup heap) (tail as)
+
+allocNodes :: Int -> GmHeap -> (GmHeap, [Addr])
+allocNodes 0 heap = (heap, [])
+allocNodes n heap = (heap2, a:as)
+  where
+    (heap1, as) = allocNodes (n -1) heap
+    (heap2, a) = hAlloc heap1 (NInd hNull)
