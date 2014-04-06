@@ -86,16 +86,16 @@ iLayn seqs = iConcat (map lay_item (zip [1..] seqs))
   where
     lay_item (n, seq) = iConcat [iFWNum 4 n, iStr ") ", iIndent seq, iNewline]
 
-iDisplay seq = flatten 0 [(seq, 0)]
+iDisplay seq = flatten 4 [(seq, 0)]
 
 flatten::Int -> [(Iseq, Int)] -> String
 flatten _ [] = ""
 flatten col ((INil, k) : seqs) = flatten col seqs
 flatten col ((IStr s,k) : seqs) = s ++ flatten col seqs
 flatten col ((INewline, indent) : seqs) =
-  '\n' : (space indent) ++ (flatten indent seqs)
+  '\n' : (space (col )) ++ (flatten (col) seqs)
 flatten col ((IIndent seq, indent):seqs) =
-  flatten (col + indent) ((seq, (col + indent)):seqs)
+  flatten (col) ((seq, (indent +col)):seqs)
  
 flatten col ((IAppend seq1 seq2, k) : seqs) =
   flatten col ((seq1, k):(seq2, k):seqs)

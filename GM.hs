@@ -1,4 +1,5 @@
 module GM where
+import PreludeDefs
 import Language
 import Parser
 import Utils
@@ -36,6 +37,7 @@ aCompile (Mult e1 e2) = aCompile e1 ++ aCompile e2 ++ [IMult]
 
 runProg::String -> String
 runProg = showResults . eval . compile . parse
+pr = putStr . runProg
 
 type GmState = (GmCode, GmStack, GmHeap, GmGlobals, GmStats)
 type GmCode = [Instruction]
@@ -162,7 +164,9 @@ compile program = (initialCode, [], heap, globals, statInitial)
 buildInitialHeap :: CoreProgram -> (GmHeap, GmGlobals)
 buildInitialHeap program = mapAccumL allocateSc hInitial compiled
   where
-    compiled = map compileSc program
+    compiled = map compileSc (preludeDefs ++ program) ++
+               compiledPrimitivies
+--    compiled = map compileSc program
 
 type GmCompiledSC = (Name, Int, GmCode)
 allocateSc :: GmHeap -> GmCompiledSC -> (GmHeap, (Name, Addr))
@@ -216,9 +220,9 @@ showSC s (name, addr) =
     (NGlobal arity code) = (hLookup (getHeap s) addr)
 showInstructions :: GmCode -> Iseq
 showInstructions is =
-  iConcat [iStr "  Code:{",
+  iConcat [iStr "  Code:{",iNewline,
            iIndent (iInterleave iNewline (map showInstruction is)),
-           iStr "}", iNewline]
+           iStr "}"]
            
 showInstruction:: Instruction -> Iseq
 showInstruction Unwind = iStr "Unwind"
@@ -233,7 +237,7 @@ showState s = iConcat [showStack s, iNewline,
                        showInstructions (getCode s), iNewline]
 showStack :: GmState -> Iseq
 showStack s =
-  iConcat [iStr " Stack:[",
+  iConcat [iStr " Stack:[", iNewline,
            iIndent (iInterleave iNewline
                     (map (showStackItem s) (reverse (getStack s)))),
            iStr "]"]
@@ -251,6 +255,6 @@ showNode s a (NAp a1 a2) = iConcat [iStr "Ap ", iStr (showaddr a1),
                                     iStr " ", iStr (showaddr a2)]
 showStats :: GmState -> Iseq
 showStats s =
-  iConcat [iStr "Steps taken = ", iNum (statGetSteps (getStats s))]
+  iConcat [iStr "Steps taken = ", iNum (statGetSteps (getStats s)), iNewline]
 
 
